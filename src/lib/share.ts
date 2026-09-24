@@ -1,11 +1,6 @@
-import { File, Paths } from 'expo-file-system';
-import { Asset, requestPermissionsAsync } from 'expo-media-library';
-import * as Sharing from 'expo-sharing';
 import type { RefObject } from 'react';
 import { Alert } from 'react-native';
 import type { View } from 'react-native';
-import { captureRef } from 'react-native-view-shot';
-import * as XLSX from 'xlsx';
 
 import { bmiCategory, calcBmi, healthyWeightRange } from './bmi';
 import { formatMonth, todayKey } from './dates';
@@ -13,7 +8,19 @@ import { sum } from './store';
 import { EXPENSE_TYPES } from './types';
 import type { AppData } from './types';
 
+// Native-backed libraries are loaded only when a button is tapped, so a module that is
+// missing from Expo Go breaks just that feature instead of crashing the app on start.
+/* eslint-disable @typescript-eslint/no-require-imports */
+const load = {
+  sharing: () => require('expo-sharing') as typeof import('expo-sharing'),
+  viewShot: () => require('react-native-view-shot') as typeof import('react-native-view-shot'),
+  fileSystem: () => require('expo-file-system') as typeof import('expo-file-system'),
+  xlsx: () => require('xlsx') as typeof import('xlsx'),
+};
+/* eslint-enable @typescript-eslint/no-require-imports */
+
 async function share(uri: string, mimeType: string, title: string) {
+  const Sharing = load.sharing();
   if (!(await Sharing.isAvailableAsync())) {
     Alert.alert('Sharing not available', 'This device cannot share files.');
     return;
@@ -21,40 +28,21 @@ async function share(uri: string, mimeType: string, title: string) {
   await Sharing.shareAsync(uri, { mimeType, dialogTitle: title });
 }
 
-/** Captures a view as PNG, then lets the user save it to the gallery or share it. */
+/** Captures a view as PNG and opens the share sheet (Save to Photos, Drive, WhatsApp…). */
 export async function screenshotView(ref: RefObject<View | null>, name: string) {
   if (!ref.current) return;
-  let uri: string;
   try {
-    uri = await captureRef(ref, { format: 'png', quality: 1, result: 'tmpfile' });
+    const uri = await load.viewShot().captureRef(ref, { format: 'png', quality: 1, result: 'tmpfile' });
+    await share(uri, 'image/png', `${name} report`);
   } catch {
-    Alert.alert('Screenshot failed', 'Please try again.');
-    return;
+    Alert.alert('Screenshot failed', 'Could not capture the report. You can still use your phone screenshot buttons.');
   }
-  Alert.alert('Screenshot ready 📸', `${name} report captured. What would you like to do?`, [
-    { text: 'Cancel', style: 'cancel' },
-    { text: 'Share', onPress: () => share(uri, 'image/png', `${name} report`).catch(() => {}) },
-    {
-      text: 'Save to Gallery',
-      onPress: async () => {
-        try {
-          const { granted } = await requestPermissionsAsync(true, ['photo']);
-          if (!granted) throw new Error('denied');
-          await Asset.create(uri);
-          Alert.alert('Saved ✅', 'The report is in your phone gallery.');
-        } catch {
-          // Expo Go on Android can't always write to the gallery; the share sheet can.
-          Alert.alert('Use Share instead', 'Saving directly is not allowed here. Choose "Save to Photos" or Drive from the share menu.', [
-            { text: 'OK', onPress: () => share(uri, 'image/png', `${name} report`).catch(() => {}) },
-          ]);
-        }
-      },
-    },
-  ]);
 }
 
 /** Builds one Excel workbook with every section of the app and opens the share sheet. */
 export async function exportExcel(data: AppData) {
+  const XLSX = load.xlsx();
+  const { File, Paths } = load.fileSystem();
   const wb = XLSX.utils.book_new();
   const add = (title: string, rows: (string | number)[][], widths: number[]) => {
     const ws = XLSX.utils.aoa_to_sheet(rows);
