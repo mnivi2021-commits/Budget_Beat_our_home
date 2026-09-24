@@ -63,6 +63,16 @@ export function alpha(hex: string, a: number): string {
   return `${hex.slice(0, 7)}${Math.round(a * 255).toString(16).padStart(2, '0')}`;
 }
 
+/** Header gradients for each section of the app. */
+export const Gradients = {
+  home: ['#58CC02', '#89E219'],
+  beat: ['#FF4B4B', '#FF7B9C'],
+  budget: ['#1CB0F6', '#4DD0FF'],
+  grocery: ['#FF9600', '#FFC800'],
+} as const;
+
+export type Section = keyof typeof Gradients;
+
 export const Fonts = {
   regular: 'Nunito_600SemiBold',
   bold: 'Nunito_700Bold',

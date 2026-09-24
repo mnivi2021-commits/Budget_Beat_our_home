@@ -1,10 +1,9 @@
 import { useState } from 'react';
-import { Alert, Pressable, StyleSheet, View } from 'react-native';
+import { Alert, Modal, Pressable, StyleSheet, TextInput, View } from 'react-native';
 
 import {
   Button,
   Card,
-  Chips,
   Divider,
   Field,
   Muted,
@@ -23,30 +22,58 @@ import {
   formatMoney,
   formatMonth,
   formatShortDate,
-  isValidDateKey,
   todayKey,
   toMonthKey,
   weekStart,
 } from '@/lib/dates';
 import { sum, useStore } from '@/lib/store';
-import { useColors } from '@/lib/theme';
-import { EXPENSE_TYPES } from '@/lib/types';
+import { exportExcel } from '@/lib/share';
+import { Fonts, alpha, useColors } from '@/lib/theme';
+import { EXPENSE_EMOJI, EXPENSE_TYPES } from '@/lib/types';
 import type { Expense, ExpenseType } from '@/lib/types';
 
 const TABS = ['Add', 'Day', 'Week', 'Month', 'P&L'] as const;
 type Tab = (typeof TABS)[number];
 
 export default function BudgetScreen() {
+  const { data } = useStore();
   const [tab, setTab] = useState<Tab>('Add');
+  const today = todayKey();
+  const month = toMonthKey(new Date());
+  const todaySpend = sum(data.expenses.filter((e) => e.date === today).map((e) => e.amount));
+  const monthSpend = sum(data.expenses.filter((e) => e.date.startsWith(month)).map((e) => e.amount));
+  const income = data.incomes[month] ?? 0;
   return (
-    <Screen title="Budget ₹" subtitle="Daily expenses, income and monthly P&L">
+    <Screen
+      title="Budget"
+      subtitle="Daily expenses, income and monthly P&L"
+      section="budget"
+      emoji="₹"
+      header={
+        <View style={styles.heroStats}>
+          <HeroStat label="Today" value={formatMoney(todaySpend)} />
+          <HeroStat label={formatMonth(month)} value={formatMoney(monthSpend)} />
+          <HeroStat label="Balance" value={formatMoney(income - monthSpend)} />
+        </View>
+      }>
       <Segments options={TABS} value={tab} onChange={setTab} />
-      {tab === 'Add' && <AddExpense />}
+      {tab === 'Add' && <AddExpenses />}
       {tab === 'Day' && <DailySummary />}
       {tab === 'Week' && <WeeklySummary />}
       {tab === 'Month' && <MonthlySummary />}
       {tab === 'P&L' && <ProfitLoss />}
     </Screen>
+  );
+}
+
+function HeroStat({ label, value }: { label: string; value: string }) {
+  return (
+    <View style={styles.heroStat}>
+      <Text style={{ color: 'rgba(255,255,255,0.85)', fontWeight: '800', fontSize: 11 }}>{label.toUpperCase()}</Text>
+      <Text style={{ color: '#fff', fontWeight: '900', fontSize: 16 }} numberOfLines={1} adjustsFontSizeToFit>
+        {value}
+      </Text>
+    </View>
   );
 }
 
@@ -56,25 +83,66 @@ function byType(expenses: Expense[]): [ExpenseType, number][] {
   return [...totals.entries()].sort((a, b) => b[1] - a[1]);
 }
 
-function AddExpense() {
+type Line = { type: ExpenseType; amount: string; note: string };
+
+const LINE_COUNT = 5;
+const DEFAULT_TYPES: ExpenseType[] = ['Food', 'Transport', 'Grocery', 'Bills', 'Other'];
+const emptyLines = (): Line[] => DEFAULT_TYPES.slice(0, LINE_COUNT).map((type) => ({ type, amount: '', note: '' }));
+
+/** Pop-up grid for choosing an expense type. */
+function TypePicker({ value, onClose }: { value: ExpenseType | null; onClose: (t: ExpenseType | null) => void }) {
   const c = useColors();
-  const { addExpense, data, setIncome } = useStore();
+  return (
+    <Modal transparent visible={value !== null} animationType="fade" onRequestClose={() => onClose(null)}>
+      <Pressable style={styles.modalBg} onPress={() => onClose(null)}>
+        <View style={[styles.modalCard, { backgroundColor: c.card, borderColor: c.border }]}>
+          <SectionTitle>Choose expense type</SectionTitle>
+          <View style={styles.typeGrid}>
+            {EXPENSE_TYPES.map((t) => {
+              const active = t === value;
+              return (
+                <Pressable
+                  key={t}
+                  onPress={() => onClose(t)}
+                  style={[
+                    styles.typeTile,
+                    { borderColor: active ? alpha(c.blue, 0.6) : c.border, backgroundColor: active ? alpha(c.blue, 0.15) : c.card },
+                  ]}>
+                  <Text style={{ fontSize: 24 }}>{EXPENSE_EMOJI[t]}</Text>
+                  <Text style={{ color: active ? c.blue : c.text, fontWeight: '800', fontSize: 12 }}>{t}</Text>
+                </Pressable>
+              );
+            })}
+          </View>
+        </View>
+      </Pressable>
+    </Modal>
+  );
+}
+
+function AddExpenses() {
+  const c = useColors();
+  const { addExpenses, data, setIncome } = useStore();
   const [date, setDate] = useState(todayKey());
-  const [type, setType] = useState<ExpenseType>('Food');
-  const [amount, setAmount] = useState('');
-  const [note, setNote] = useState('');
+  const [lines, setLines] = useState<Line[]>(emptyLines);
+  const [picking, setPicking] = useState<number | null>(null);
 
   const month = toMonthKey(new Date());
   const [income, setIncomeText] = useState(data.incomes[month] ? String(data.incomes[month]) : '');
 
-  const save = () => {
-    const a = Number(amount);
-    if (!isValidDateKey(date)) return Alert.alert('Check date', 'Use the format YYYY-MM-DD, e.g. 2026-09-24.');
-    if (!(a > 0)) return Alert.alert('Check amount', 'Enter an amount greater than 0.');
-    addExpense({ date, type, amount: a, note: note.trim() || undefined });
-    setAmount('');
-    setNote('');
-    Alert.alert('Saved', `${type} · ${formatMoney(a)} on ${formatShortDate(date)}`);
+  const setLine = (i: number, patch: Partial<Line>) => setLines((ls) => ls.map((l, j) => (j === i ? { ...l, ...patch } : l)));
+
+  const filled = lines.filter((l) => l.amount.trim() !== '');
+  const linesTotal = sum(filled.map((l) => Number(l.amount) || 0));
+  const dayList = data.expenses.filter((e) => e.date === date);
+
+  const saveAll = () => {
+    if (!filled.length) return Alert.alert('Nothing to save', 'Enter an amount in at least one line.');
+    const bad = filled.findIndex((l) => !(Number(l.amount) > 0));
+    if (bad >= 0) return Alert.alert('Check amount', `Line ${lines.indexOf(filled[bad]) + 1} has an invalid amount.`);
+    addExpenses(filled.map((l) => ({ date, type: l.type, amount: Number(l.amount), note: l.note.trim() || undefined })));
+    setLines(emptyLines());
+    Alert.alert('Saved ✅', `${filled.length} expense(s) · ${formatMoney(linesTotal)} on ${formatShortDate(date)}`);
   };
 
   const saveIncome = () => {
@@ -86,36 +154,78 @@ function AddExpense() {
 
   return (
     <>
+      <Stepper label={formatDate(date)} onPrev={() => setDate(addDays(date, -1))} onNext={() => setDate(addDays(date, 1))} />
+      {date !== todayKey() ? (
+        <Text style={{ color: c.blue, fontWeight: '900', textAlign: 'center', marginTop: -6 }} onPress={() => setDate(todayKey())}>
+          ↺ Back to today
+        </Text>
+      ) : null}
+
       <Card>
-        <SectionTitle>Add expense</SectionTitle>
-        <Text style={[styles.label, { color: c.muted }]}>Date</Text>
-        <View style={styles.dateRow}>
-          <Button small variant="outline" title="◀ Prev" onPress={() => isValidDateKey(date) && setDate(addDays(date, -1))} />
-          <View style={{ flex: 1 }}>
-            <Field label="" value={date} onChangeText={setDate} placeholder="YYYY-MM-DD" />
+        <SectionTitle>Day expenses · 5 lines</SectionTitle>
+        <Muted style={{ marginBottom: 10 }}>Tap the type to change it. Empty lines are skipped.</Muted>
+        {lines.map((l, i) => (
+          <View key={i} style={[styles.line, { borderColor: c.border }]}>
+            <View style={[styles.lineNo, { backgroundColor: alpha(c.blue, 0.15) }]}>
+              <Text style={{ color: c.blue, fontWeight: '900' }}>{i + 1}</Text>
+            </View>
+            <View style={{ flex: 1, gap: 6 }}>
+              <View style={{ flexDirection: 'row', gap: 8 }}>
+                <Pressable
+                  onPress={() => setPicking(i)}
+                  style={[styles.typeBtn, { borderColor: c.border, backgroundColor: c.inputBg }]}>
+                  <Text style={{ color: c.text, fontWeight: '800' }} numberOfLines={1}>
+                    {EXPENSE_EMOJI[l.type]} {l.type} ▾
+                  </Text>
+                </Pressable>
+                <TextInput
+                  value={l.amount}
+                  onChangeText={(t) => setLine(i, { amount: t })}
+                  placeholder="₹ 0"
+                  placeholderTextColor={c.muted}
+                  keyboardType="decimal-pad"
+                  style={[styles.lineInput, { flex: 1, color: c.text, borderColor: c.border, backgroundColor: c.inputBg, fontFamily: Fonts.heavy }]}
+                />
+              </View>
+              <TextInput
+                value={l.note}
+                onChangeText={(t) => setLine(i, { note: t })}
+                placeholder="Note (optional)"
+                placeholderTextColor={c.muted}
+                style={[styles.lineInput, { color: c.text, borderColor: c.border, backgroundColor: c.inputBg, fontFamily: Fonts.bold }]}
+              />
+            </View>
           </View>
-          <Button small variant="outline" title="Next ▶" onPress={() => isValidDateKey(date) && setDate(addDays(date, 1))} />
+        ))}
+        <Row label="Lines total" value={formatMoney(linesTotal)} color={c.expense} bold />
+        <View style={{ flexDirection: 'row', gap: 10, marginTop: 8 }}>
+          <View style={{ flex: 2 }}>
+            <Button title={`Save ${filled.length || ''} expense${filled.length === 1 ? '' : 's'}`} onPress={saveAll} color={c.blue} />
+          </View>
+          <View style={{ flex: 1 }}>
+            <Button title="Clear" onPress={() => setLines(emptyLines())} variant="outline" color={c.muted} />
+          </View>
         </View>
-        <Muted style={{ marginTop: -6, marginBottom: 10 }}>
-          {isValidDateKey(date) ? formatDate(date) : 'Invalid date'}
-          {date !== todayKey() ? '  ·  ' : ''}
-          {date !== todayKey() ? (
-            <Text style={{ color: c.primary, fontWeight: '700' }} onPress={() => setDate(todayKey())}>
-              Today
-            </Text>
-          ) : null}
-        </Muted>
-        <Text style={[styles.label, { color: c.muted }]}>Expense type</Text>
-        <Chips options={EXPENSE_TYPES} value={type} onChange={setType} />
-        <Field label="Amount (₹)" value={amount} onChangeText={setAmount} keyboardType="decimal-pad" placeholder="0" />
-        <Field label="Note (optional)" value={note} onChangeText={setNote} placeholder="e.g. vegetables, bus ticket" />
-        <Button title="Save expense" onPress={save} />
+      </Card>
+
+      <TypePicker
+        value={picking === null ? null : lines[picking].type}
+        onClose={(t) => {
+          if (t && picking !== null) setLine(picking, { type: t });
+          setPicking(null);
+        }}
+      />
+
+      <Card>
+        <Row label={`Already saved on ${formatShortDate(date)}`} value={formatMoney(sum(dayList.map((e) => e.amount)))} bold />
+        <Divider />
+        <ExpenseList expenses={dayList} />
       </Card>
 
       <Card>
         <SectionTitle>Income for {formatMonth(month)}</SectionTitle>
         <Field label="Monthly income (₹)" value={income} onChangeText={setIncomeText} keyboardType="decimal-pad" placeholder="0" />
-        <Button title="Save income" onPress={saveIncome} variant="outline" />
+        <Button title="Save income" onPress={saveIncome} variant="outline" color={c.blue} />
         <Muted style={{ marginTop: 8 }}>For other months, open the P&L tab.</Muted>
       </Card>
     </>
@@ -350,13 +460,27 @@ function ProfitLoss() {
           ])}
         />
       </Card>
+
+      <Button
+        title="📊 Export all data to Excel"
+        onPress={() => exportExcel(data).catch(() => Alert.alert('Export failed', 'Please try again.'))}
+        color={c.primary}
+      />
     </>
   );
 }
 
 const styles = StyleSheet.create({
-  label: { fontSize: 12, fontWeight: '700', marginBottom: 6, textTransform: 'uppercase' },
-  dateRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  heroStats: { flexDirection: 'row', gap: 8 },
+  heroStat: { flex: 1, backgroundColor: 'rgba(255,255,255,0.2)', borderRadius: 14, paddingVertical: 8, paddingHorizontal: 10 },
+  line: { flexDirection: 'row', gap: 10, paddingVertical: 10, borderTopWidth: 2 },
+  lineNo: { width: 28, height: 28, borderRadius: 14, alignItems: 'center', justifyContent: 'center', marginTop: 8 },
+  typeBtn: { flex: 1.3, borderWidth: 2, borderRadius: 12, paddingHorizontal: 10, justifyContent: 'center' },
+  lineInput: { borderWidth: 2, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 8, fontSize: 15 },
+  modalBg: { flex: 1, backgroundColor: 'rgba(0,0,0,0.45)', justifyContent: 'center', padding: 20 },
+  modalCard: { borderRadius: 20, borderWidth: 2, padding: 18 },
+  typeGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  typeTile: { width: '31%', alignItems: 'center', paddingVertical: 10, borderRadius: 14, borderWidth: 2, borderBottomWidth: 4, gap: 2 },
   item: { flexDirection: 'row', alignItems: 'center', paddingVertical: 10, borderBottomWidth: 1 },
   barRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 5, gap: 6 },
   barTrack: { flex: 1, height: 10, borderRadius: 5, overflow: 'hidden' },

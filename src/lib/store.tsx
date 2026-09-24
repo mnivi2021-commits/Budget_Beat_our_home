@@ -4,25 +4,45 @@ import type { ReactNode } from 'react';
 
 import { calcBmi } from './bmi';
 import { todayKey } from './dates';
-import { EMPTY_DATA } from './types';
-import type { AppData, Expense, GroceryItem, Profile } from './types';
+import { EMPTY_DATA, MAX_PEOPLE } from './types';
+import type { Activity, AppData, Expense, GroceryItem, Person } from './types';
 
 const STORAGE_KEY = 'budget-and-beat:v1';
 
 export const newId = () => `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
 
+/** Upgrades data saved by older versions of the app (single profile, no grocery categories). */
+function migrate(raw: any): AppData {
+  const d: AppData = { ...EMPTY_DATA, ...raw };
+  if (raw.profile && !raw.people) {
+    const id = 'p1';
+    d.people = [{ id, avatar: '🧑', ...raw.profile }];
+    d.activePersonId = id;
+    d.weightLog = (raw.weightLog ?? []).map((w: any) => ({ personId: id, ...w }));
+  }
+  delete (d as any).profile;
+  const withCategory = (items: GroceryItem[]) => items.map((i) => ({ ...i, category: i.category ?? 'Other' }));
+  d.groceryTemplate = withCategory(d.groceryTemplate);
+  d.groceryMonths = Object.fromEntries(Object.entries(d.groceryMonths).map(([m, items]) => [m, withCategory(items)]));
+  return d;
+}
+
 type Store = {
   ready: boolean;
   data: AppData;
-  saveProfile: (p: Profile) => void;
-  addExpense: (e: Omit<Expense, 'id'>) => void;
+  activePerson: Person | null;
+  savePerson: (p: Person) => void;
+  deletePerson: (id: string) => void;
+  setActivePerson: (id: string) => void;
+  saveActivity: (a: Activity) => void;
+  addExpenses: (list: Omit<Expense, 'id'>[]) => void;
   deleteExpense: (id: string) => void;
   setIncome: (month: string, amount: number) => void;
   saveGroceryTemplate: (items: GroceryItem[]) => void;
-  /** Creates the month's list from the template if it doesn't exist yet. */
-  startGroceryMonth: (month: string) => void;
+  /** Creates the month's list from the given items (master list or another month). */
+  startGroceryMonth: (month: string, from: GroceryItem[]) => void;
   saveGroceryMonth: (month: string, items: GroceryItem[]) => void;
-  resetAll: () => void;
+  setGroceryBudget: (amount: number) => void;
 };
 
 const StoreContext = createContext<Store | null>(null);
@@ -35,7 +55,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     AsyncStorage.getItem(STORAGE_KEY)
       .then((raw) => {
-        if (raw) setData({ ...EMPTY_DATA, ...JSON.parse(raw) });
+        if (raw) setData(migrate(JSON.parse(raw)));
       })
       .catch(() => {})
       .finally(() => {
@@ -55,27 +75,52 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     () => ({
       ready,
       data,
-      saveProfile: (p) =>
+      activePerson: data.people.find((p) => p.id === data.activePersonId) ?? data.people[0] ?? null,
+      savePerson: (p) =>
         update((d) => {
-          const entry = { date: todayKey(), weightKg: p.weightKg, bmi: calcBmi(p.weightKg, p.heightCm) };
-          const log = [...d.weightLog.filter((w) => w.date !== entry.date), entry].sort((a, b) =>
-            a.date.localeCompare(b.date),
-          );
-          return { ...d, profile: p, weightLog: log };
+          const exists = d.people.some((x) => x.id === p.id);
+          if (!exists && d.people.length >= MAX_PEOPLE) return d;
+          const people = exists ? d.people.map((x) => (x.id === p.id ? p : x)) : [...d.people, p];
+          const entry = { personId: p.id, date: todayKey(), weightKg: p.weightKg, bmi: calcBmi(p.weightKg, p.heightCm) };
+          const weightLog = [
+            ...d.weightLog.filter((w) => !(w.personId === p.id && w.date === entry.date)),
+            entry,
+          ].sort((a, b) => a.date.localeCompare(b.date));
+          return { ...d, people, weightLog, activePersonId: p.id };
         }),
-      addExpense: (e) => update((d) => ({ ...d, expenses: [...d.expenses, { ...e, id: newId() }] })),
+      deletePerson: (id) =>
+        update((d) => {
+          const people = d.people.filter((p) => p.id !== id);
+          return {
+            ...d,
+            people,
+            activePersonId: d.activePersonId === id ? (people[0]?.id ?? null) : d.activePersonId,
+            weightLog: d.weightLog.filter((w) => w.personId !== id),
+            activities: d.activities.filter((a) => a.personId !== id),
+          };
+        }),
+      setActivePerson: (id) => update((d) => ({ ...d, activePersonId: id })),
+      saveActivity: (a) =>
+        update((d) => ({
+          ...d,
+          activities: [...d.activities.filter((x) => !(x.personId === a.personId && x.date === a.date)), a].sort(
+            (x, y) => x.date.localeCompare(y.date),
+          ),
+        })),
+      addExpenses: (list) =>
+        update((d) => ({ ...d, expenses: [...d.expenses, ...list.map((e) => ({ ...e, id: newId() }))] })),
       deleteExpense: (id) => update((d) => ({ ...d, expenses: d.expenses.filter((e) => e.id !== id) })),
       setIncome: (month, amount) => update((d) => ({ ...d, incomes: { ...d.incomes, [month]: amount } })),
       saveGroceryTemplate: (items) => update((d) => ({ ...d, groceryTemplate: items })),
-      startGroceryMonth: (month) =>
+      startGroceryMonth: (month, from) =>
         update((d) => {
           if (d.groceryMonths[month]) return d;
-          const items = d.groceryTemplate.map((i) => ({ ...i, id: newId(), bought: false }));
+          const items = from.map((i) => ({ ...i, id: newId(), bought: false }));
           return { ...d, groceryMonths: { ...d.groceryMonths, [month]: items } };
         }),
       saveGroceryMonth: (month, items) =>
         update((d) => ({ ...d, groceryMonths: { ...d.groceryMonths, [month]: items } })),
-      resetAll: () => update(() => EMPTY_DATA),
+      setGroceryBudget: (amount) => update((d) => ({ ...d, groceryBudget: amount })),
     }),
     [data, ready, update],
   );

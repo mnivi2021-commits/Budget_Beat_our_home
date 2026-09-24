@@ -1,11 +1,12 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { router } from 'expo-router';
 import type { ComponentProps } from 'react';
-import { Pressable, StyleSheet, View } from 'react-native';
+import { Alert, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 
-import { Bubble, Card, ProgressBar, Row, Screen, Text } from '@/components/ui';
+import { Bubble, Button, Card, ProgressBar, Row, Screen, SectionTitle, Text } from '@/components/ui';
 import { bmiCategory, calcBmi } from '@/lib/bmi';
 import { addDays, formatMoney, formatMonth, todayKey, toMonthKey } from '@/lib/dates';
+import { exportExcel } from '@/lib/share';
 import { groceryTotal, sum, useStore } from '@/lib/store';
 import { shade, useColors } from '@/lib/theme';
 import type { Expense } from '@/lib/types';
@@ -25,7 +26,7 @@ function logStreak(expenses: Expense[]): number {
 
 export default function HomeScreen() {
   const c = useColors();
-  const { data } = useStore();
+  const { data, activePerson, setActivePerson } = useStore();
   const today = todayKey();
   const month = toMonthKey(new Date());
 
@@ -34,33 +35,38 @@ export default function HomeScreen() {
   const income = data.incomes[month] ?? 0;
   const net = income - monthSpend;
   const streak = logStreak(data.expenses);
-
-  const profile = data.profile;
-  const bmi = profile ? calcBmi(profile.weightKg, profile.heightCm) : 0;
-  const cat = profile ? bmiCategory(bmi) : null;
+  const activeToday = new Set(data.activities.filter((a) => a.date === today).map((a) => a.personId));
 
   const groceries = data.groceryMonths[month] ?? [];
   const bought = groceries.filter((g) => g.bought).length;
 
+  const name = activePerson?.name;
   let tip: string;
-  if (!profile) tip = "Hi there! Let's start with your health check. Tap the heart ❤ below.";
-  else if (!data.expenses.some((e) => e.date === today))
-    tip = `Hi ${profile.name}! You haven't logged any spending today. Tap the wallet to add it.`;
-  else if (!income) tip = `Nice work, ${profile.name}! Now add this month's income to see your profit & loss.`;
-  else if (streak >= 3) tip = `🔥 ${streak}-day streak, ${profile.name}! Keep logging every day.`;
-  else tip = `Great job, ${profile.name}! Today you spent ${formatMoney(todaySpend)}.`;
+  if (!data.people.length) tip = "Hi there! Let's start with your family's health check. Tap the heart ❤ below.";
+  else if (!data.expenses.some((e) => e.date === today)) tip = `Hi ${name}! No spending logged today yet. Tap the wallet to add up to 5 at once.`;
+  else if (activeToday.size < data.people.length) tip = `Don't forget today's activity: steps, water, exercise and sleep in Beat ❤.`;
+  else if (!income) tip = `Nice work! Now add this month's income to see your profit & loss.`;
+  else if (streak >= 3) tip = `🔥 ${streak}-day streak! Keep logging every day.`;
+  else tip = `Great job! Today you spent ${formatMoney(todaySpend)}.`;
+
+  const exportNow = () => exportExcel(data).catch(() => Alert.alert('Export failed', 'Please try again.'));
 
   return (
-    <Screen title="Budget & Beat">
-      <View style={styles.stats}>
-        <Stat icon="🔥" value={String(streak)} label="day streak" color={c.orange} />
-        <Stat icon="⭐" value={String(data.expenses.length)} label="entries" color={c.yellow} />
-        <Stat icon="❤" value={profile ? bmi.toFixed(1) : '–'} label="BMI" color={c.beat} />
-      </View>
-
+    <Screen
+      title="Budget & Beat"
+      subtitle={name ? `Hello, ${name} 👋` : 'Our home: money + health'}
+      section="home"
+      emoji="🏡"
+      header={
+        <View style={styles.stats}>
+          <Stat icon="🔥" value={String(streak)} label="day streak" />
+          <Stat icon="⭐" value={String(data.expenses.length + data.activities.length)} label="entries" />
+          <Stat icon="👨‍👩‍👧" value={`${data.people.length}/5`} label="family" />
+        </View>
+      }>
       <Bubble>{tip}</Bubble>
 
-      <View style={[styles.unit, { backgroundColor: c.primary, borderColor: shade(c.primary) }]}>
+      <View style={[styles.unit, { backgroundColor: c.blue, borderColor: shade(c.blue) }]}>
         <Text style={styles.unitTag}>THIS MONTH · {formatMonth(month).toUpperCase()}</Text>
         <Text style={styles.unitTitle}>{net >= 0 ? `Saved ${formatMoney(net)}` : `Over by ${formatMoney(-net)}`}</Text>
         <Text style={styles.unitSub}>
@@ -74,23 +80,37 @@ export default function HomeScreen() {
         </Text>
       </View>
 
+      {data.people.length ? (
+        <Card>
+          <SectionTitle>Family health</SectionTitle>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 10 }}>
+            {data.people.map((p) => {
+              const bmi = calcBmi(p.weightKg, p.heightCm);
+              const cat = bmiCategory(bmi);
+              return (
+                <Pressable
+                  key={p.id}
+                  onPress={() => {
+                    setActivePerson(p.id);
+                    router.navigate('/beat');
+                  }}
+                  style={[styles.member, { borderColor: c.border }]}>
+                  <Text style={{ fontSize: 30 }}>{p.avatar}</Text>
+                  <Text style={{ color: c.text, fontWeight: '900', fontSize: 13 }} numberOfLines={1}>
+                    {p.name}
+                  </Text>
+                  <Text style={{ color: cat.color, fontWeight: '900', fontSize: 15 }}>{bmi.toFixed(1)}</Text>
+                  <Text style={{ color: c.muted, fontSize: 10, fontWeight: '800' }}>{activeToday.has(p.id) ? '✅ logged today' : '⏳ log today'}</Text>
+                </Pressable>
+              );
+            })}
+          </ScrollView>
+        </Card>
+      ) : null}
+
       <View style={styles.path}>
-        <PathNode
-          offset={-60}
-          icon="heart"
-          color={c.beat}
-          title="Beat"
-          caption={cat ? cat.label : 'Health check'}
-          onPress={() => router.navigate('/beat')}
-        />
-        <PathNode
-          offset={50}
-          icon="wallet"
-          color={c.blue}
-          title="Budget"
-          caption={`Today ${formatMoney(todaySpend)}`}
-          onPress={() => router.navigate('/budget')}
-        />
+        <PathNode offset={-60} icon="heart" color={c.beat} title="Beat" caption="Health & activity" onPress={() => router.navigate('/beat')} />
+        <PathNode offset={50} icon="wallet" color={c.blue} title="Budget" caption={`Today ${formatMoney(todaySpend)}`} onPress={() => router.navigate('/budget')} />
         <PathNode
           offset={-40}
           icon="cart"
@@ -110,18 +130,26 @@ export default function HomeScreen() {
           <Row label="List total" value={formatMoney(groceryTotal(groceries))} />
         </Card>
       ) : null}
+
+      <Card>
+        <SectionTitle>📊 Excel report</SectionTitle>
+        <Text style={{ color: c.muted, marginBottom: 12 }}>
+          One Excel file with sheets for Family Health, Daily Activity, Weight Log, Expenses, Monthly P&L and Grocery. Save it to
+          Drive, send it on WhatsApp or open it in Excel.
+        </Text>
+        <Button title="Export to Excel" onPress={exportNow} />
+      </Card>
     </Screen>
   );
 }
 
-function Stat({ icon, value, label, color }: { icon: string; value: string; label: string; color: string }) {
-  const c = useColors();
+function Stat({ icon, value, label }: { icon: string; value: string; label: string }) {
   return (
-    <View style={[styles.stat, { borderColor: c.border }]}>
+    <View style={styles.stat}>
       <Text style={{ fontSize: 20 }}>{icon}</Text>
       <View>
-        <Text style={{ color, fontWeight: '900', fontSize: 18, lineHeight: 22 }}>{value}</Text>
-        <Text style={{ color: c.muted, fontWeight: '700', fontSize: 11 }}>{label}</Text>
+        <Text style={{ color: '#fff', fontWeight: '900', fontSize: 17, lineHeight: 21 }}>{value}</Text>
+        <Text style={{ color: 'rgba(255,255,255,0.88)', fontWeight: '800', fontSize: 11 }}>{label}</Text>
       </View>
     </View>
   );
@@ -149,11 +177,7 @@ function PathNode({
       <Pressable onPress={onPress}>
         {({ pressed }) => (
           <View style={[styles.nodeOuter, { paddingTop: pressed ? 6 : 0 }]}>
-            <View
-              style={[
-                styles.node,
-                { backgroundColor: color, borderBottomColor: shade(color, 0.75), borderBottomWidth: pressed ? 0 : 6 },
-              ]}>
+            <View style={[styles.node, { backgroundColor: color, borderBottomColor: shade(color, 0.75), borderBottomWidth: pressed ? 0 : 6 }]}>
               <Ionicons name={icon} size={36} color="#fff" />
             </View>
           </View>
@@ -172,15 +196,16 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
-    borderWidth: 2,
+    backgroundColor: 'rgba(255,255,255,0.2)',
     borderRadius: 14,
     paddingVertical: 8,
     paddingHorizontal: 10,
   },
-  unit: { borderRadius: 16, borderBottomWidth: 5, padding: 16 },
+  unit: { borderRadius: 18, borderBottomWidth: 5, padding: 16 },
   unitTag: { color: 'rgba(255,255,255,0.85)', fontWeight: '900', fontSize: 12, letterSpacing: 1 },
   unitTitle: { color: '#fff', fontWeight: '900', fontSize: 24, marginTop: 2 },
   unitSub: { color: 'rgba(255,255,255,0.9)', fontWeight: '700', fontSize: 13 },
+  member: { width: 96, alignItems: 'center', borderWidth: 2, borderBottomWidth: 4, borderRadius: 16, paddingVertical: 10, paddingHorizontal: 6 },
   path: { gap: 18, paddingVertical: 10 },
   nodeOuter: { height: 84, justifyContent: 'flex-start' },
   node: { width: 78, height: 78, borderRadius: 39, alignItems: 'center', justifyContent: 'center' },

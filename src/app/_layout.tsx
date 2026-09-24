@@ -8,10 +8,12 @@ import {
 } from '@expo-google-fonts/nunito';
 import { Tabs } from 'expo-router/js-tabs';
 import { StatusBar } from 'expo-status-bar';
+import { useCallback, useState } from 'react';
 import type { ComponentProps } from 'react';
 import { ActivityIndicator, View } from 'react-native';
 import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { Intro } from '@/components/intro';
 import { StoreProvider, useStore } from '@/lib/store';
 import { Fonts, alpha, useColors } from '@/lib/theme';
 
@@ -41,6 +43,8 @@ function AppTabs() {
   const { ready } = useStore();
   const insets = useSafeAreaInsets();
   const [fontsLoaded] = useFonts({ Nunito_600SemiBold, Nunito_700Bold, Nunito_800ExtraBold, Nunito_900Black });
+  const [showIntro, setShowIntro] = useState(true);
+  const hideIntro = useCallback(() => setShowIntro(false), []);
 
   if (!ready || !fontsLoaded) {
     return (
@@ -49,6 +53,8 @@ function AppTabs() {
       </View>
     );
   }
+
+  if (showIntro) return <Intro onDone={hideIntro} />;
 
   return (
     <Tabs

@@ -1,9 +1,12 @@
+import { LinearGradient } from 'expo-linear-gradient';
+import { StatusBar } from 'expo-status-bar';
 import type { ComponentProps, ReactNode } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text as RNText, TextInput, View } from 'react-native';
 import type { KeyboardTypeOptions, StyleProp, TextStyle, ViewStyle } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { Fonts, alpha, shade, useColors } from '@/lib/theme';
+import { Fonts, Gradients, alpha, shade, useColors } from '@/lib/theme';
+import type { Section } from '@/lib/theme';
 
 /**
  * Text that uses the rounded Nunito font. Android can't pick a font weight from a
@@ -17,22 +20,97 @@ export function Text({ style, ...rest }: ComponentProps<typeof RNText>) {
   return <RNText {...rest} style={[flat, { fontFamily: family, fontWeight: undefined }]} />;
 }
 
-export function Screen({ title, subtitle, children }: { title: string; subtitle?: string; children: ReactNode }) {
+/** Page with a colourful gradient header that scrolls with the content. */
+export function Screen({
+  title,
+  subtitle,
+  section,
+  emoji,
+  header,
+  children,
+}: {
+  title: string;
+  subtitle?: string;
+  section: Section;
+  emoji: string;
+  /** Extra content inside the header (stats, pickers…). */
+  header?: ReactNode;
+  children: ReactNode;
+}) {
   const c = useColors();
+  const insets = useSafeAreaInsets();
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: c.bg }} edges={['top']}>
-      <ScrollView contentContainerStyle={styles.screen} keyboardShouldPersistTaps="handled">
-        <Text style={[styles.title, { color: c.text }]}>{title}</Text>
-        {subtitle ? <Text style={[styles.subtitle, { color: c.muted }]}>{subtitle}</Text> : null}
-        {children}
+    <View style={{ flex: 1, backgroundColor: c.bg }}>
+      <StatusBar style="light" />
+      <ScrollView contentContainerStyle={{ paddingBottom: 48 }} keyboardShouldPersistTaps="handled">
+        <LinearGradient
+          colors={Gradients[section]}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 1 }}
+          style={[styles.hero, { paddingTop: insets.top + 14 }]}>
+          <Text style={styles.heroEmoji}>{emoji}</Text>
+          <Text style={styles.heroTitle}>{title}</Text>
+          {subtitle ? <Text style={styles.heroSub}>{subtitle}</Text> : null}
+          {header ? <View style={{ marginTop: 14 }}>{header}</View> : null}
+        </LinearGradient>
+        <View style={styles.screen}>{children}</View>
       </ScrollView>
-    </SafeAreaView>
+    </View>
   );
 }
 
 export function Card({ children, style }: { children: ReactNode; style?: StyleProp<ViewStyle> }) {
   const c = useColors();
   return <View style={[styles.card, { backgroundColor: c.card, borderColor: c.border }, style]}>{children}</View>;
+}
+
+/** − value + control. */
+export function Counter({
+  value,
+  onChange,
+  step = 1,
+  min = 0,
+  color,
+  format,
+  small,
+}: {
+  value: number;
+  onChange: (v: number) => void;
+  step?: number;
+  min?: number;
+  color?: string;
+  format?: (v: number) => string;
+  small?: boolean;
+}) {
+  const c = useColors();
+  const tint = color ?? c.blue;
+  const size = small ? 26 : 40;
+  const btn = (label: string, next: number) => (
+    <Pressable
+      onPress={() => onChange(Math.max(min, Math.round(next * 100) / 100))}
+      hitSlop={6}
+      style={({ pressed }) => [
+        styles.counterBtn,
+        {
+          width: size,
+          height: size,
+          borderRadius: size / 3,
+          borderColor: alpha(tint, 0.5),
+          backgroundColor: pressed ? alpha(tint, 0.3) : alpha(tint, 0.12),
+        },
+      ]}>
+      <Text style={{ color: tint, fontWeight: '900', fontSize: small ? 15 : 20, lineHeight: small ? 18 : 24 }}>{label}</Text>
+    </Pressable>
+  );
+  return (
+    <View style={{ flexDirection: 'row', alignItems: 'center', gap: small ? 4 : 10 }}>
+      {btn('−', value - step)}
+      <Text style={{ color: c.text, fontWeight: '900', fontSize: small ? 13 : 18, minWidth: small ? 28 : 56, textAlign: 'center' }}>
+        {format ? format(value) : String(value)}
+      </Text>
+      {btn('+', value + step)}
+    </View>
+  );
 }
 
 export function SectionTitle({ children }: { children: ReactNode }) {
@@ -300,10 +378,23 @@ export function Table({ columns, rows, footer }: { columns: Column[]; rows: Reac
 }
 
 const styles = StyleSheet.create({
-  screen: { padding: 16, paddingBottom: 48, gap: 14 },
-  title: { fontSize: 30, fontWeight: '900' },
-  subtitle: { fontSize: 15, marginTop: -10 },
-  card: { borderRadius: 16, borderWidth: 2, borderBottomWidth: 4, padding: 16 },
+  screen: { padding: 16, gap: 14 },
+  hero: { paddingHorizontal: 20, paddingBottom: 22, borderBottomLeftRadius: 28, borderBottomRightRadius: 28 },
+  heroEmoji: { position: 'absolute', right: 18, bottom: 8, fontSize: 72, opacity: 0.25 },
+  heroTitle: { color: '#fff', fontSize: 32, fontWeight: '900' },
+  heroSub: { color: 'rgba(255,255,255,0.92)', fontSize: 15, fontWeight: '700', marginTop: 2 },
+  card: {
+    borderRadius: 18,
+    borderWidth: 2,
+    borderBottomWidth: 4,
+    padding: 16,
+    shadowColor: '#000',
+    shadowOpacity: 0.06,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 3 },
+    elevation: 1,
+  },
+  counterBtn: { borderWidth: 2, alignItems: 'center', justifyContent: 'center' },
   sectionTitle: { fontSize: 19, fontWeight: '900', marginBottom: 10 },
   label: { fontSize: 12, fontWeight: '900', marginBottom: 6, letterSpacing: 0.8, textTransform: 'uppercase' },
   input: { borderWidth: 2, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 11, fontSize: 16 },
