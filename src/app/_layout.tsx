@@ -17,6 +17,25 @@ import { Fonts, alpha, useColors } from '@/lib/theme';
 
 type IconName = ComponentProps<typeof Ionicons>['name'];
 
+/** Duolingo-style tab icon: outlined, coloured tile when selected. */
+function TabIcon({ name, tint, muted, focused }: { name: IconName; tint: string; muted: string; focused: boolean }) {
+  return (
+    <View
+      style={{
+        width: 48,
+        height: 36,
+        borderRadius: 12,
+        borderWidth: 2,
+        alignItems: 'center',
+        justifyContent: 'center',
+        borderColor: focused ? alpha(tint, 0.6) : 'transparent',
+        backgroundColor: focused ? alpha(tint, 0.15) : 'transparent',
+      }}>
+      <Ionicons name={name} size={24} color={focused ? tint : muted} />
+    </View>
+  );
+}
+
 function AppTabs() {
   const c = useColors();
   const { ready } = useStore();
@@ -31,25 +50,6 @@ function AppTabs() {
     );
   }
 
-  // Duolingo-style tab icon: outlined, coloured tile when selected.
-  const icon =
-    (name: IconName, tint: string) =>
-    ({ focused }: { focused: boolean }) => (
-      <View
-        style={{
-          width: 48,
-          height: 36,
-          borderRadius: 12,
-          borderWidth: 2,
-          alignItems: 'center',
-          justifyContent: 'center',
-          borderColor: focused ? alpha(tint, 0.6) : 'transparent',
-          backgroundColor: focused ? alpha(tint, 0.15) : 'transparent',
-        }}>
-        <Ionicons name={name} size={24} color={focused ? tint : c.muted} />
-      </View>
-    );
-
   return (
     <Tabs
       screenOptions={{
@@ -61,19 +61,19 @@ function AppTabs() {
       }}>
       <Tabs.Screen
         name="index"
-        options={{ title: 'Home', tabBarIcon: icon('home', c.primary), tabBarActiveTintColor: c.primary }}
+        options={{ title: 'Home', tabBarIcon: ({ focused }) => <TabIcon name="home" tint={c.primary} muted={c.muted} focused={focused} />, tabBarActiveTintColor: c.primary }}
       />
       <Tabs.Screen
         name="beat"
-        options={{ title: 'Beat', tabBarIcon: icon('heart', c.beat), tabBarActiveTintColor: c.beat }}
+        options={{ title: 'Beat', tabBarIcon: ({ focused }) => <TabIcon name="heart" tint={c.beat} muted={c.muted} focused={focused} />, tabBarActiveTintColor: c.beat }}
       />
       <Tabs.Screen
         name="budget"
-        options={{ title: 'Budget', tabBarIcon: icon('wallet', c.blue), tabBarActiveTintColor: c.blue }}
+        options={{ title: 'Budget', tabBarIcon: ({ focused }) => <TabIcon name="wallet" tint={c.blue} muted={c.muted} focused={focused} />, tabBarActiveTintColor: c.blue }}
       />
       <Tabs.Screen
         name="grocery"
-        options={{ title: 'Grocery', tabBarIcon: icon('cart', c.orange), tabBarActiveTintColor: c.orange }}
+        options={{ title: 'Grocery', tabBarIcon: ({ focused }) => <TabIcon name="cart" tint={c.orange} muted={c.muted} focused={focused} />, tabBarActiveTintColor: c.orange }}
       />
       {/* Leftover screen from the Expo starter template; hidden from the tab bar. */}
       <Tabs.Screen name="explore" options={{ href: null }} />
