@@ -1,5 +1,5 @@
 import type { RefObject } from 'react';
-import { Alert } from 'react-native';
+import { Alert, PixelRatio } from 'react-native';
 import type { View } from 'react-native';
 
 import { bmiCategory, calcBmi, healthyWeightRange } from './bmi';
@@ -29,10 +29,13 @@ async function share(uri: string, mimeType: string, title: string) {
 }
 
 /** Captures a view as PNG and opens the share sheet (Save to Photos, Drive, WhatsApp…). */
-export async function screenshotView(ref: RefObject<View | null>, name: string) {
+export async function screenshotView(ref: RefObject<View | null>, name: string, size?: { width: number; height: number }) {
   if (!ref.current) return;
   try {
-    const uri = await load.viewShot().captureRef(ref, { format: 'png', quality: 1, result: 'tmpfile' });
+    // Save at 1080 px wide (sharp on any phone), keeping the card's proportions.
+    const px = PixelRatio.get();
+    const scaled = size && size.width > 0 ? { width: 1080 / px, height: (size.height * 1080) / size.width / px } : {};
+    const uri = await load.viewShot().captureRef(ref, { format: 'png', quality: 1, result: 'tmpfile', ...scaled });
     await share(uri, 'image/png', `${name} report`);
   } catch {
     Alert.alert('Screenshot failed', 'Could not capture the report. You can still use your phone screenshot buttons.');

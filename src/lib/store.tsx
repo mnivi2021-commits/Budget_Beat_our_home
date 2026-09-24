@@ -35,6 +35,8 @@ type Store = {
   deletePerson: (id: string) => void;
   setActivePerson: (id: string) => void;
   saveActivity: (a: Activity) => void;
+  deleteActivity: (personId: string, date: string) => void;
+  deleteWeightLog: (personId: string, date: string) => void;
   addExpenses: (list: Omit<Expense, 'id'>[]) => void;
   deleteExpense: (id: string) => void;
   setIncome: (month: string, amount: number) => void;
@@ -107,6 +109,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             (x, y) => x.date.localeCompare(y.date),
           ),
         })),
+      deleteActivity: (personId, date) =>
+        update((d) => ({ ...d, activities: d.activities.filter((a) => !(a.personId === personId && a.date === date)) })),
+      deleteWeightLog: (personId, date) =>
+        update((d) => ({ ...d, weightLog: d.weightLog.filter((w) => !(w.personId === personId && w.date === date)) })),
       addExpenses: (list) =>
         update((d) => ({ ...d, expenses: [...d.expenses, ...list.map((e) => ({ ...e, id: newId() }))] })),
       deleteExpense: (id) => update((d) => ({ ...d, expenses: d.expenses.filter((e) => e.id !== id) })),
